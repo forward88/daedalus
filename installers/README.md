@@ -35,7 +35,7 @@ possible combinations:
     [1 of 2] Compiling Types            ( Types.hs, interpreted )
     [2 of 2] Compiling Config           ( Config.hs, interpreted )
     Ok, modules loaded: Config, Types.
-    *Config> generateAllConfigs "./dhall"
+    *Config> checkAllConfigs "./dhall"
 
 ..which will be silent if everything is well, and will otherwise provide
 a detailed explanation of what is wrong, and where.

@@ -6,25 +6,25 @@
 {-# LANGUAGE TypeOperators     #-}
 {-# LANGUAGE DataKinds         #-}
 module Config
-  ( generateConfig
+  ( checkAllConfigs
+  , generateConfig, generateOSConfigs
   , ConfigRequest(..)
   , OS(..), Cluster(..), Config(..)
   , optReadLower, argReadLower
   , Options(..), optionsParser
+  , Command(..), commandParser
   -- Re-export Turtle:
   , options
   ) where
 
 import qualified Control.Exception                as Ex
+import           Control.Monad                       (forM_)
 
-import qualified Data.Char
 import           Data.ByteString                     (writeFile)
-import qualified Data.List                        as L
 import qualified Data.Map                         as Map
 import           Data.Maybe
 import           Data.Optional                       (Optional)
-import           Data.Semigroup
-import           Data.Text                           (Text, pack, unpack)
+import           Data.Text                           (Text, pack, unpack, intercalate, toLower)
 import qualified Data.Yaml                        as YAML
 
 import qualified Dhall                            as Dhall
@@ -35,8 +35,7 @@ import qualified GHC.IO.Encoding                  as GHC
 import qualified System.IO                        as Sys
 import qualified System.Exit                      as Sys
 
-import           Text.Printf                         (printf)
-import           Turtle                              (optional)
+import           Turtle                              (optional, format, (%), s)
 import           Turtle.Options
 
 import           Prelude                     hiding (writeFile)
@@ -53,16 +52,23 @@ import           Types
 -- λ> fmap ((fmap toLower) . show) x
 -- ["bar","baz"]
 diagReadCaseInsensitive :: (Bounded a, Enum a, Read a, Show a) => String -> Maybe a
-diagReadCaseInsensitive str = diagRead $ Data.Char.toLower <$> str
-  where mapping    = Map.fromList [ (Data.Char.toLower <$> show x, x) | x <- enumFromTo minBound maxBound ]
+diagReadCaseInsensitive str = diagRead $ toLower $ pack str
+  where mapping    = Map.fromList [ (lshowText x, x) | x <- enumFromTo minBound maxBound ]
         diagRead x = Just $ flip fromMaybe (Map.lookup x mapping)
-                     (error $ printf ("Couldn't parse '%s' as one of: %s")
-                                     str (L.intercalate ", " $ Map.keys mapping))
+                     (errorT $ format ("Couldn't parse '"%s%"' as one of: "%s)
+                               (pack str) (intercalate ", " $ Map.keys mapping))
 
 optReadLower :: (Bounded a, Enum a, Read a, Show a) => ArgName -> ShortName -> Optional HelpMessage -> Parser a
 optReadLower = opt (diagReadCaseInsensitive . unpack)
 argReadLower :: (Bounded a, Enum a, Read a, Show a) => ArgName -> Optional HelpMessage -> Parser a
 argReadLower = arg (diagReadCaseInsensitive . unpack)
+
+data Command
+  = GenConfig
+    { cmdDhallRoot :: Text
+    }
+  | GenInstaller
+  deriving (Eq, Show)
 
 data Options = Options
   { oAPI           :: API
@@ -75,6 +81,16 @@ data Options = Options
   , oTestInstaller :: TestInstaller
   , oCI            :: CI
   }
+
+commandParser :: Parser Command
+commandParser = (fromMaybe GenInstaller <$>) . optional $
+  subcommandGroup "Subcommands:"
+  [ ("config",     "Build configs for an OS",
+      GenConfig
+      <$> (argText "DIR" "Directory with Dhall config files"))
+  , ("installer",  "Build an installer",
+      pure GenInstaller)
+  ]
 
 optionsParser :: Parser Options
 optionsParser = Options
@@ -101,17 +117,22 @@ dhallTopExpr :: Text -> Config -> OS -> Cluster -> Text
 dhallTopExpr path Launcher os cluster = path <> "/launcher.dhall ( "<>path<>"/" <> lshowText cluster <> ".dhall "<>path<>"/" <> lshowText os <> ".dhall ) "<>path<>"/" <> lshowText os <> ".dhall"
 dhallTopExpr path Topology os cluster = path <> "/topology.dhall ( "<>path<>"/" <> lshowText cluster <> ".dhall "<>path<>"/" <> lshowText os <> ".dhall )"
 
-generateAllConfigs :: Text -> IO ()
-generateAllConfigs configRoot =
-  let oses     = enumFromTo minBound maxBound
-      clusters = enumFromTo minBound maxBound
-      configs  = enumFromTo minBound maxBound
-  in mapM (Dhall.detailed . Dhall.codeToValue "(stdin)")
-     [ dhallTopExpr configRoot cfg os cluster
-     | os      <- oses
-     , cluster <- clusters
-     , cfg     <- configs ]
-     >> pure ()
+forOSConfigValues :: (Cluster -> Config -> YAML.Value -> IO a) -> Text -> OS -> IO ()
+forOSConfigValues action configRoot os = sequence
+  [ action cluster cfg =<<
+    (Dhall.detailed $ Dhall.codeToValue "(stdin)" $ dhallTopExpr configRoot cfg os cluster)
+  | cluster <- enumFromTo minBound maxBound
+  , cfg     <- enumFromTo minBound maxBound ]
+  >> pure ()
+
+checkAllConfigs :: Text -> IO ()
+checkAllConfigs = forM_ (enumFromTo minBound maxBound) .
+                  forOSConfigValues (\_ _ _ -> pure ())
+
+generateOSConfigs :: Text -> OS -> IO ()
+generateOSConfigs = forOSConfigValues $ \_ config val -> do
+  GHC.setLocaleEncoding GHC.utf8
+  writeFile (configFilename config) $ YAML.encode val
 
 generateConfig :: ConfigRequest -> FilePath -> FilePath -> IO ()
 generateConfig ConfigRequest{..} configRoot outFile = handle $ do

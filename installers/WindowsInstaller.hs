@@ -7,7 +7,7 @@ import           Universum hiding (pass, writeFile)
 
 import           Control.Monad (unless)
 import qualified Data.List as L
-import           Data.Maybe (fromJust, fromMaybe)
+import           Data.Maybe (fromJust)
 import           Data.Monoid ((<>))
 import           Data.Text (Text, unpack)
 import qualified Data.Text as T
@@ -199,10 +199,7 @@ main opts@Options{..}  = do
         fullName    = "daedalus-win64-" <> fromVer fullVersion <> "-" <> lshowText oCluster <> "-installer.exe"
     TIO.writeFile "version.txt" $ fromVer fullVersion
 
-    echo "Generating configuration file:  launcher-config.yaml"
-    generateConfig (ConfigRequest Win64 oCluster Launcher) "./dhall" "launcher-config.yaml"
-    echo "Generating configuration file:  wallet-topology.yaml"
-    generateConfig (ConfigRequest Win64 oCluster Topology) "./dhall" "wallet-topology.yaml"
+    generateOSConfigs "./dhall" Win64
 
     echo "Packaging frontend"
     packageFrontend

@@ -1,12 +1,14 @@
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 module Types
   (  -- * Atomic types
     API(..)
   , OS(..)
+  , Installation(..)
   , Cluster(..)
-  , Config(..)
+  , Config(..), configFilename
   , CI(..)
   , ConfigRequest(..)
 
@@ -20,10 +22,11 @@ module Types
 
   -- * Misc
   , lshowText
+  , errorT
   )
 where
 
-import           Data.Text                           (Text, toLower)
+import           Data.Text                           (Text, toLower, unpack)
 import           Data.String                         (IsString)
 import qualified Universum
 import           Prelude
@@ -46,10 +49,17 @@ data Cluster
   | Staging
   deriving (Bounded, Enum, Eq, Read, Show)
 
+data Installation = Installation
+  deriving (Show)
+
 data Config
   = Launcher
   | Topology
   deriving (Bounded, Enum, Eq, Show)
+
+configFilename :: Config -> FilePath
+configFilename Launcher = "launcher-config.yaml"
+configFilename Topology = "wallet-topology.yaml"
 
 data CI
   = Appveyor
@@ -80,3 +90,6 @@ testInstaller    False  = DontTestInstaller
 
 lshowText :: Show a => a -> Text
 lshowText = toLower . Universum.show
+
+errorT :: Text -> a
+errorT = error . unpack

@@ -1,5 +1,7 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 module MacInstaller
     ( main
@@ -22,13 +24,12 @@ import           Control.Monad (unless)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           System.Directory (copyFile, createDirectoryIfMissing, doesFileExist, renameFile)
-import           System.Environment (lookupEnv, setEnv)
+import           System.Environment (setEnv)
 import           System.FilePath ((</>), FilePath)
 import           System.FilePath.Glob (glob)
 import           Filesystem.Path.CurrentOS (encodeString)
 import qualified Filesystem.Path as P
-import           Turtle (Shell, ExitCode (..), echo, proc, procs, inproc, which, Managed, with, printf, format, (%), l, pwd, cd, sh, mktree)
-import           Text.Printf (printf)
+import           Turtle (Shell, ExitCode (..), echo, proc, procs, inproc, shells, which, Managed, with, format, printf, (%), l, s, pwd, cd, sh, mktree)
 import           Turtle.Line (unsafeTextToLine)
 
 import           RewriteLibs (chain)
@@ -46,10 +47,7 @@ main opts@Options{..} = do
 
   let appRoot = "../release/darwin-x64/Daedalus-darwin-x64/Daedalus.app"
 
-  echo "Generating configuration file:  launcher-config.yaml"
-  generateConfig (ConfigRequest Macos64 oCluster Launcher) "./dhall" "launcher-config.yaml"
-  echo "Generating configuration file:  wallet-topology.yaml"
-  generateConfig (ConfigRequest Macos64 oCluster Topology) "./dhall" "wallet-topology.yaml"
+  generateOSConfigs "./dhall" Macos64
 
   echo "Packaging frontend"
   shells "npm run package -- --icon installers/icons/256x256" mempty
@@ -64,14 +62,14 @@ main opts@Options{..} = do
 
   when (oTestInstaller == TestInstaller) $ do
     echo $ "--test-installer passed, will test the installer for installability"
-    shells (T.pack $ printf "sudo installer -dumplog -verbose -target / -pkg \"%s\"" oOutput) empty
+    shells (format ("sudo installer -dumplog -verbose -target / -pkg \""%s%"\"") oOutput) empty
 
 makeScriptsDir :: Options -> Managed T.Text
 makeScriptsDir Options{..} = case oAPI of
   Cardano -> pure "data/scripts"
   ETC     -> pure "[DEVOPS-533]"
 
-npmPackage :: InstallerConfig -> Shell ()
+npmPackage :: Options -> Shell ()
 npmPackage _ = do
   mktree "release"
   echo "~~~ Installing nodejs dependencies..."
@@ -85,17 +83,17 @@ npmPackage _ = do
 withDir :: P.FilePath -> IO a -> IO a
 withDir d = bracket (pwd >>= \old -> (cd d >> pure old)) cd . const
 
-makeInstaller :: InstallerConfig -> IO FilePath
-makeInstaller cfg = do
-  let dir     = appRoot cfg </> "Contents/MacOS"
-      resDir  = appRoot cfg </> "Contents/Resources"
+makeInstaller :: Options -> FilePath -> IO FilePath
+makeInstaller options@Options{..} appRoot = do
+  let dir     = appRoot </> "Contents/MacOS"
+      resDir  = appRoot </> "Contents/Resources"
   createDirectoryIfMissing False "dist"
 
   echo "Creating icons ..."
   procs "iconutil" ["--convert", "icns", "--output", "icons/electron.icns"
                    , "icons/electron.iconset"] mempty
 
-  withDir ".." . sh $ npmPackage cfg
+  withDir ".." . sh $ npmPackage options
 
   echo "~~~ Preparing files ..."
   case oAPI of
@@ -131,7 +129,7 @@ makeInstaller cfg = do
   run "chmod" ["+x", toText (dir </> "Frontend")]
   writeLauncherFile dir
 
-  with (makeScriptsDir opts) $ \scriptsDir -> do
+  with (makeScriptsDir options) $ \scriptsDir -> do
     let
       pkgargs :: [ T.Text ]
       pkgargs =
