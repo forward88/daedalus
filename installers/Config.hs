@@ -6,9 +6,9 @@
 {-# LANGUAGE TypeOperators     #-}
 {-# LANGUAGE DataKinds         #-}
 module Config
-  ( checkAllConfigs
-  , generateConfig, generateOSConfigs
-  , ConfigRequest(..)
+  ( ConfigRequest, mkStubConfigRequest
+  , checkAllConfigs
+  , generateOSConfigs
   , OS(..), Cluster(..), Config(..)
   , optReadLower, argReadLower
   , Options(..), optionsParser
@@ -20,11 +20,12 @@ module Config
 import qualified Control.Exception                as Ex
 import           Control.Monad                       (forM_)
 
-import           Data.ByteString                     (writeFile)
+import qualified Data.ByteString                  as BS
 import qualified Data.Map                         as Map
 import           Data.Maybe
 import           Data.Optional                       (Optional)
-import           Data.Text                           (Text, pack, unpack, intercalate, toLower)
+import           Data.Semigroup                      ((<>))
+import           Data.Text                           (Text, pack, unpack, intercalate, toLower, unlines)
 import qualified Data.Yaml                        as YAML
 
 import qualified Dhall                            as Dhall
@@ -32,13 +33,15 @@ import qualified Dhall.JSON                       as Dhall
 
 import qualified GHC.IO.Encoding                  as GHC
 
+import qualified System.Environment               as Sys
 import qualified System.IO                        as Sys
+import qualified System.IO.Temp                   as Sys
 import qualified System.Exit                      as Sys
 
 import           Turtle                              (optional, format, (%), s)
 import           Turtle.Options
 
-import           Prelude                     hiding (writeFile)
+import           Prelude                      hiding (unlines, writeFile)
 import           Types
 
 
@@ -63,10 +66,22 @@ optReadLower = opt (diagReadCaseInsensitive . unpack)
 argReadLower :: (Bounded a, Enum a, Read a, Show a) => ArgName -> Optional HelpMessage -> Parser a
 argReadLower = arg (diagReadCaseInsensitive . unpack)
 
+data ConfigRequest = ConfigRequest
+  { cfrCardano           :: Text
+  , cfrConfigFiles       :: Text
+  , cfrDaedalusFrontend  :: Text
+  , cfrDhallRoot         :: Text
+  } deriving (Eq, Show)
+
+renderConfigRequest :: ConfigRequest -> Text
+renderConfigRequest ConfigRequest{..} = unlines
+  [ "{ cardano          = \""<> cfrCardano          <> "\""
+  , ", configFiles      = \""<> cfrConfigFiles      <> "\""
+  , ", daedalusFrontend = \""<> cfrDaedalusFrontend <> "\""
+  , "}"]
+
 data Command
-  = GenConfig
-    { cmdDhallRoot :: Text
-    }
+  = GenConfig ConfigRequest
   | GenInstaller
   deriving (Eq, Show)
 
@@ -86,8 +101,15 @@ commandParser :: Parser Command
 commandParser = (fromMaybe GenInstaller <$>) . optional $
   subcommandGroup "Subcommands:"
   [ ("config",     "Build configs for an OS",
-      GenConfig
-      <$> (argText "DIR" "Directory with Dhall config files"))
+      (GenConfig <$>) $
+      ConfigRequest
+       <$> (fromMaybe "/nix/store/HASH-cardano-sl.stub"
+                      <$> (optional $ optText "cardano"            's' "Path to cardano-sl"))
+       <*> (fromMaybe "/nix/store/HASH-config-files.stub"
+                      <$> (optional $ optText "config-files"       'c' "Config files directory"))
+       <*> (fromMaybe "/nix/store/HASH-daedalus-frontend.stub"
+                      <$> (optional $ optText "daedalus-frontend"  'f' "Daedalus frontend directory"))
+       <*> optText "dhall-root"  'r' "Directory containing Dhall config files")
   , ("installer",  "Build an installer",
       pure GenInstaller)
   ]
@@ -104,7 +126,8 @@ optionsParser = Options
       (AppName      <$> optText "appname"             'n' "Application name:  daedalus or..")))
   <*> (fromMaybe "dev"   <$> (optional $
       (Version      <$> optText "daedalus-version"    'v' "Daedalus version string")))
-  <*>                   optText "output"              'o' "Installer output file"
+  <*> (fromMaybe (error "--output not specified for 'installer' subcommand")
+       <$> (optional $  optText "output"              'o' "Installer output file"))
   <*> (optional   $
       (PullReq      <$> optText "pull-request"        'r' "Pull request #"))
   <*> (testInstaller
@@ -113,37 +136,36 @@ optionsParser = Options
 
 
 
-dhallTopExpr :: Text -> Config -> OS -> Cluster -> Text
-dhallTopExpr path cfg os cluster
-  | Launcher <- cfg = format (s%" "%s%" ("%s%" "%s%" "%s%" )") (comp Launcher) (comp cluster) (comp os) (comp cluster) (comp Installation)
-  | Topology <- cfg = format (s%" "%s)               (comp Topology) (comp cluster)
-  where comp x = format (s%"/"%s%".dhall") path (lshowText x)
+dhallTopExpr :: ConfigRequest -> Text -> Config -> OS -> Cluster -> Text
+dhallTopExpr ConfigRequest{..} installation cfg os cluster
+  | Launcher <- cfg = format (s%" "%s%" ("%s%" "%s%" "%s%" )") (comp Launcher) (comp cluster) (comp os) (comp cluster) installation
+  | Topology <- cfg = format (s%" "%s)                         (comp Topology) (comp cluster)
+  where comp x = format (s%"/"%s%".dhall") cfrDhallRoot (lshowText x)
 
-forOSConfigValues :: (Cluster -> Config -> YAML.Value -> IO a) -> Text -> OS -> IO ()
-forOSConfigValues action configRoot os = sequence
-  [ action cluster cfg =<<
-    (Dhall.detailed $ Dhall.codeToValue "(stdin)" $ dhallTopExpr configRoot cfg os cluster)
-  | cluster <- enumFromTo minBound maxBound
-  , cfg     <- enumFromTo minBound maxBound ]
-  >> pure ()
+forOSConfigValues :: (Cluster -> Config -> YAML.Value -> IO a) -> ConfigRequest -> OS -> IO ()
+forOSConfigValues action cfreq os = do
+  tmpdir       <- fromMaybe "/tmp" <$> Sys.lookupEnv "TMPDIR"
+  installation <- Sys.writeTempFile tmpdir "installation-dhall-" $ unpack $ renderConfigRequest cfreq
+  sequence [ action cluster cfg =<<
+             (Dhall.detailed $ Dhall.codeToValue "(stdin)" $ dhallTopExpr cfreq (pack installation) cfg os cluster)
+           | cluster <- enumFromTo minBound maxBound
+           , cfg     <- enumFromTo minBound maxBound ]
+  pure ()
+
+mkStubConfigRequest :: Text -> ConfigRequest
+mkStubConfigRequest cfrDhallRoot = ConfigRequest
+  { cfrCardano          = ""
+  , cfrConfigFiles      = ""
+  , cfrDaedalusFrontend = ""
+  , .. }
 
 checkAllConfigs :: Text -> IO ()
-checkAllConfigs = forM_ (enumFromTo minBound maxBound) .
-                  forOSConfigValues (\_ _ _ -> pure ())
+checkAllConfigs = forM_ (enumFromTo minBound maxBound) . forOSConfigValues (\_ _ _ -> pure ()) . mkStubConfigRequest
 
-generateOSConfigs :: Text -> OS -> IO ()
+generateOSConfigs :: ConfigRequest -> OS -> IO ()
 generateOSConfigs = forOSConfigValues $ \_ config val -> do
   GHC.setLocaleEncoding GHC.utf8
-  writeFile (configFilename config) $ YAML.encode val
-
-generateConfig :: ConfigRequest -> FilePath -> FilePath -> IO ()
-generateConfig ConfigRequest{..} configRoot outFile = handle $ do
-  GHC.setLocaleEncoding GHC.utf8
-
-  let inText = dhallTopExpr (pack configRoot) rConfig rOS rCluster
-
-  writeFile outFile =<<
-    YAML.encode <$> Dhall.detailed (Dhall.codeToValue "(stdin)" inText)
+  BS.writeFile (configFilename config) $ YAML.encode val
 
 -- | Generic error handler: be it encoding/decoding, file IO, parsing or type-checking.
 handle :: IO a -> IO a

@@ -39,8 +39,8 @@ main = do
              _         -> error ("Unsupported OS: " <> pack Sys.os)
 
   case command of
-    GenConfig dhallRoot ->
-      generateOSConfigs dhallRoot os
+    GenConfig cfreq ->
+      generateOSConfigs cfreq os
     GenInstaller -> do
       putStrLn $ "Generating installer for " <>  Sys.os <> "-" <> Sys.arch
       case os of

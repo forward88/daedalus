@@ -6,11 +6,9 @@ module Types
   (  -- * Atomic types
     API(..)
   , OS(..)
-  , Installation(..)
   , Cluster(..)
   , Config(..), configFilename
   , CI(..)
-  , ConfigRequest(..)
 
   , AppName(..)
   , BuildJob(..)
@@ -23,6 +21,7 @@ module Types
   -- * Misc
   , lshowText
   , errorT
+  , (.:)
   )
 where
 
@@ -49,9 +48,6 @@ data Cluster
   | Staging
   deriving (Bounded, Enum, Eq, Read, Show)
 
-data Installation = Installation
-  deriving (Show)
-
 data Config
   = Launcher
   | Topology
@@ -67,13 +63,6 @@ data CI
   | Buildkite
   | Manual
   deriving (Bounded, Enum, Eq, Read, Show)
-
--- | What runtime config file to generate.
-data ConfigRequest = ConfigRequest
-  { rOS      :: OS
-  , rCluster :: Cluster
-  , rConfig  :: Config
-  } deriving (Eq, Show)
 
 newtype AppName      = AppName      { fromAppName      :: Text } deriving (Eq, IsString, Show)
 newtype BuildJob     = BuildJob     { fromBuildJob     :: Text } deriving (Eq, IsString, Show)
@@ -93,3 +82,6 @@ lshowText = toLower . Universum.show
 
 errorT :: Text -> a
 errorT = error . unpack
+
+(.:) :: (c -> d) -> (a -> b -> c) -> a -> b -> d
+(.:) = (.) . (.)

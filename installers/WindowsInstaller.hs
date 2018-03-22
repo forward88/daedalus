@@ -199,7 +199,7 @@ main opts@Options{..}  = do
         fullName    = "daedalus-win64-" <> fromVer fullVersion <> "-" <> lshowText oCluster <> "-installer.exe"
     TIO.writeFile "version.txt" $ fromVer fullVersion
 
-    generateOSConfigs "./dhall" Win64
+    generateOSConfigs (mkStubConfigRequest "./dhall") Win64
 
     echo "Packaging frontend"
     packageFrontend

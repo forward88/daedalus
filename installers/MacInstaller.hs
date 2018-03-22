@@ -47,7 +47,7 @@ main opts@Options{..} = do
 
   let appRoot = "../release/darwin-x64/Daedalus-darwin-x64/Daedalus.app"
 
-  generateOSConfigs "./dhall" Macos64
+  generateOSConfigs (mkStubConfigRequest "./dhall") Macos64
 
   echo "Packaging frontend"
   shells "npm run package -- --icon installers/icons/256x256" mempty
@@ -84,7 +84,7 @@ withDir :: P.FilePath -> IO a -> IO a
 withDir d = bracket (pwd >>= \old -> (cd d >> pure old)) cd . const
 
 makeInstaller :: Options -> FilePath -> IO FilePath
-makeInstaller options@Options{..} appRoot = do
+makeInstaller opts@Options{..} appRoot = do
   let dir     = appRoot </> "Contents/MacOS"
       resDir  = appRoot </> "Contents/Resources"
   createDirectoryIfMissing False "dist"
@@ -93,7 +93,7 @@ makeInstaller options@Options{..} appRoot = do
   procs "iconutil" ["--convert", "icns", "--output", "icons/electron.icns"
                    , "icons/electron.iconset"] mempty
 
-  withDir ".." . sh $ npmPackage options
+  withDir ".." . sh $ npmPackage opts
 
   echo "~~~ Preparing files ..."
   case oAPI of
@@ -129,7 +129,7 @@ makeInstaller options@Options{..} appRoot = do
   run "chmod" ["+x", toText (dir </> "Frontend")]
   writeLauncherFile dir
 
-  with (makeScriptsDir options) $ \scriptsDir -> do
+  with (makeScriptsDir opts) $ \scriptsDir -> do
     let
       pkgargs :: [ T.Text ]
       pkgargs =
@@ -185,7 +185,7 @@ signingConfig = SigningConfig
 -- | Runs "security import -x"
 importCertificate :: SigningConfig -> FilePath -> Maybe Text -> IO ExitCode
 importCertificate SigningConfig{..} cert password = do
-  let optArg s = map toText . maybe [] (\p -> [s, p])
+  let optArg str = map toText . maybe [] (\p -> [str, p])
       certPass = optArg "-P" password
       keyChain = optArg "-k" signingKeyChain
   productSign <- optArg "-T" . fmap (toText . encodeString) <$> which "productsign"

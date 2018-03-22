@@ -18,6 +18,11 @@ let
       rev = self.master_config.cardano_rev;
       sha256 = self.master_config.cardano_hash;
     };
+    cardanoProgs = pkgs.runCommand "cardano" {} ''
+      mkdir -pv $out/bin/
+      cp ${self.cardanoPkgs.cardano-sl-wallet}/bin/cardano-node $out/bin/
+      cp ${self.cardanoPkgs.cardano-sl-tools}/bin/cardano-launcher $out/bin/
+    '';
     cardanoPkgs = import self.cardanoSrc {
       gitrev = self.cardanoSrc.rev;
       config = {
@@ -33,7 +38,11 @@ let
         };
       };
     };
+
+    installer-generator = import ./installers/default.nix;
+
     daedalus = self.callPackage ./installers/nix/linux.nix {};
+
     rawapp = self.callPackage ./yarn2nix.nix { api = "ada"; };
     nix-bundle = import (pkgs.fetchFromGitHub {
       owner = "matthewbauer";
@@ -61,7 +70,7 @@ let
       cat /etc/nsswitch.conf > etc/nsswitch.conf
       cat /etc/machine-id > etc/machine-id
       cat /etc/resolv.conf > etc/resolv.conf
-      exec .${self.nix-bundle.nix-user-chroot}/bin/nix-user-chroot -n ./nix -c -m /home:/home -m /etc:/host-etc -m etc:/etc -p DISPLAY -p HOME -p XAUTHORITY -- /nix/var/nix/profiles/profile/bin/enter-phase2 daedalus
+      exec .${self.nix-bundle.nix-user-chroot}/bin/nix-user-chroot -n ./nix -c -m /home:/home -m /etc:/host-etc -m etc:/etc -p DISPLAY -p HOME -p XAUTHORITY -- /nix/var/nix/profiles/profile/bin/enter-phase2 self.daedalus
     '';
     versionInfo = builtins.toFile "versioninfo.json" (builtins.toJSON self.master_config);
     postInstall = pkgs.writeScriptBin "post-install" ''

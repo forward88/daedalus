@@ -32,7 +32,6 @@ executable make-installer
                      , split
                      , system-filepath
                      , temporary
-                     , temporary
                      , text
                      , turtle
                      , universum
@@ -64,6 +63,7 @@ executable load-certificate
                      , optional-args
                      , split
                      , system-filepath
+                     , temporary
                      , text
                      , turtle
                      , universum

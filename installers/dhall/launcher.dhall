@@ -20,6 +20,8 @@
     , "--topology",            os.nodeArgs.topology
     , "--wallet-db-path",      os.nodeArgs.walletDBPath
     , "--update-latest-path",  os.nodeArgs.updateLatestPath
+    , "--wallet-address",      "127.0.0.1:8090"
+    -- XXX: this is a workaround for Linux
     , "--update-with-package"
     ]
 } // os.pass

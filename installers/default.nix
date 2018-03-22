@@ -12,6 +12,9 @@ with haskell.lib;
         sha256 = "0pvbpbg6475drvpakny12y3z2dv0vj6x4hlk853dgb84xbsd8i33";
       };
       jailbreak = true;
+      libraryHaskellDepends = drv.libraryHaskellDepends ++ [
+        aeson-pretty
+      ];
     })).override {
       dhall      = overrideCabal dhall (drv: {
         src = pkgs.fetchFromGitHub {
@@ -22,6 +25,7 @@ with haskell.lib;
         };
         jailbreak = true;
         libraryHaskellDepends = drv.libraryHaskellDepends ++ [
+          base16-bytestring
           insert-ordered-containers
           lens-family-core
           prettyprinter-ansi-terminal
