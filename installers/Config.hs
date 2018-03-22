@@ -114,8 +114,10 @@ optionsParser = Options
 
 
 dhallTopExpr :: Text -> Config -> OS -> Cluster -> Text
-dhallTopExpr path Launcher os cluster = path <> "/launcher.dhall ( "<>path<>"/" <> lshowText cluster <> ".dhall "<>path<>"/" <> lshowText os <> ".dhall ) "<>path<>"/" <> lshowText os <> ".dhall"
-dhallTopExpr path Topology os cluster = path <> "/topology.dhall ( "<>path<>"/" <> lshowText cluster <> ".dhall "<>path<>"/" <> lshowText os <> ".dhall )"
+dhallTopExpr path cfg os cluster
+  | Launcher <- cfg = format (s%" "%s%" ("%s%" "%s%" "%s%" )") (comp Launcher) (comp cluster) (comp os) (comp cluster) (comp Installation)
+  | Topology <- cfg = format (s%" "%s)               (comp Topology) (comp cluster)
+  where comp x = format (s%"/"%s%".dhall") path (lshowText x)
 
 forOSConfigValues :: (Cluster -> Config -> YAML.Value -> IO a) -> Text -> OS -> IO ()
 forOSConfigValues action configRoot os = sequence
